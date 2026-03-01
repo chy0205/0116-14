@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>崇華十四期管理系統</title>
+    <title>崇華十四期整合管理系統</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <style>
@@ -292,7 +292,7 @@
     <header class="bg-white/80 backdrop-blur-md border-b p-4 flex justify-between items-center sticky top-0 z-50">
         <div class="flex items-center gap-2">
             <div class="w-8 h-8 bg-emerald-600 rounded-lg flex items-center justify-center text-white font-bold">崇</div>
-            <h1 class="text-lg font-black text-slate-800 tracking-tight">十四期系統</h1>
+            <h1 class="text-lg font-black text-slate-800 tracking-tight">十四期管理系統</h1>
         </div>
         <div id="user-display" class="hidden flex items-center">
             <div class="text-right mr-3">
@@ -540,12 +540,12 @@
                         </path>
                     </svg>
                 </div>
-                <h2 class="text-2xl font-black mb-6 text-slate-800">測驗</h2>
+                <h2 class="text-2xl font-black mb-6 text-slate-800">學員測驗</h2>
                 <div class="space-y-4">
                     <select id="quiz-type-select"
                         class="w-full p-4 rounded-2xl bg-slate-50 border border-slate-200 outline-none font-bold text-slate-700">
                         <option value="" disabled selected>請選擇科目</option>
-                        <option value="論語">論語</option>
+                        <option value="論語">論語課程</option>
                         <option value="性理">性理題釋</option>
                         <option value="道德經">道德經</option>
                         <option value="六祖">六祖壇經</option>
@@ -572,7 +572,7 @@
                         </svg>
                     </div>
                     <div>
-                        <h2 class="text-2xl font-black text-slate-800">作業繳交</h2>
+                        <h2 class="text-2xl font-black text-slate-800">心得作業繳交</h2>
                         <p class="text-slate-500 text-xs font-bold">記錄您的學習成長與體悟</p>
                     </div>
                 </div>
@@ -983,7 +983,7 @@
         const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwRLE0Axl6MVXY-23dB9_R1Gg8YtZOgce5_uAzqMi1UQV-NhB0RketT_o3y9nJGZrEcuA/exec';
         const SPREADSHEET_ID = '1LRPB-bZdvGyqgOO_vBTeW5xhOweuJPI4qQArEiNPZI4';
         const TEAMS_GID = '1026036029';
-        const GROUP_ORDER = ['', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+        const GROUP_ORDER = ['第一組', '第二組', '第三組', '第四組', '第五組', '第六組', '第七組', '孟加拉', '德國', '印尼', '馬來', '神州', '主領班', '特助'];
         const QUIZ_GIDS = { '隨堂': '0', '論語': '1250135497', '性理': '1342680959', '道德經': '1246480043', '六祖': '1302889740' };
         const MAX_FILE_SIZE = 20 * 1024 * 1024;
 
@@ -994,8 +994,17 @@
         // --- 核心工具 ---
         function parseToTaipeiDate(val) {
             if (!val) return null;
-            const cleanVal = val.toString().replace(/\//g, '-').replace(' ', 'T');
-            return new Date(cleanVal + (cleanVal.includes('+') ? '' : '+08:00'));
+            let str = val.toString().trim();
+            // Google Sheets returns UTC timestamp like 2026-03-01T01:44:00.000Z
+            // Or UI submits "2026-03-01 09:44"
+            let basicMatch = str.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?(\.\d+)?$/);
+            if (basicMatch) {
+                return new Date(`${basicMatch[1]}-${basicMatch[2].padStart(2, '0')}-${basicMatch[3].padStart(2, '0')}T${basicMatch[4].padStart(2, '0')}:${basicMatch[5].padStart(2, '0')}:${basicMatch[6] ? basicMatch[6].padStart(2, '0') : '00'}+08:00`);
+            }
+            let parsed = new Date(str);
+            if (!isNaN(parsed.getTime())) return parsed;
+            let cleanVal = str.replace(/\//g, '-').replace(' ', 'T');
+            return new Date(cleanVal + (cleanVal.match(/[A-Za-z]|[+-]\d{2}/) ? '' : '+08:00'));
         }
 
         function getBatchFormattedDate() {
@@ -1167,6 +1176,7 @@
                 checkAttendance();
                 checkLocationPermission();
             }
+            if (viewName === 'quiz' && currentUser) loadQuizConfigs();
             if (viewName === 'results' && currentUser) loadHistoryData();
             if (viewName === 'admin' && currentUser) loadAdminDashboard();
             if (viewName === 'questions' && currentUser) loadQuestionsView();
@@ -1857,10 +1867,17 @@
                 if (driveInput) driveInput.value = driveFolder.start;
 
                 const sConf = config['隨堂'] || { start: '', end: '' };
-                const format = (v) => { if (!v) return ''; let d = v.toString().trim().replace(/\//g, '-').replace(' ', 'T'); return d.substring(0, 16); };
+                const formatForUI = (v) => {
+                    let d = parseToTaipeiDate(v);
+                    if (!d || isNaN(d.getTime())) return v ? v.toString().substring(0, 16).replace(' ', 'T') : '';
+                    let localTimeMs = d.getTime() + (d.getTimezoneOffset() * 60000) + (8 * 3600000);
+                    let tpe = new Date(localTimeMs);
+                    const pad = n => String(n).padStart(2, '0');
+                    return `${tpe.getFullYear()}-${pad(tpe.getMonth() + 1)}-${pad(tpe.getDate())}T${pad(tpe.getHours())}:${pad(tpe.getMinutes())}`;
+                };
                 const sI = document.getElementById('unified-quiz-start'), eI = document.getElementById('unified-quiz-end');
-                if (sI) sI.value = format(sConf.start);
-                if (eI) eI.value = format(sConf.end);
+                if (sI) sI.value = formatForUI(sConf.start);
+                if (eI) eI.value = formatForUI(sConf.end);
 
                 const now = new Date(), st = parseToTaipeiDate(sConf.start), et = parseToTaipeiDate(sConf.end);
                 currentQuizOpenStatus = (st && et && now >= st && now <= et);
